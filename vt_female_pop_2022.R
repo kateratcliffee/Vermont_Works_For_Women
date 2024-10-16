@@ -33,3 +33,30 @@ vt_females_2022 <- get_acs (geography = "block group",
                             survey = "acs5",
                             state = "VT", 
                             output = "wide" )
+
+#add new column to table with percent female
+vt_females_2022$ratio_f <- vt_females_2022$B01001_026E/vt_females_2022$B01001_001E
+vt_females_2022$per_f <- vt_females_2022$ratio_f*100
+
+#new column with just county name 
+library(stringr)
+vt_females_2022$County <- str_extract(vt_females_2022$NAME, "\\b\\w+ County\\b")
+
+#group median percent female by County
+library(dplyr)
+
+females_county_summ <- vt_females_2022 %>%
+  group_by(County) %>%
+  summarise(Med_Per_Female = median(per_f, na.rm = TRUE))
+
+#make bar chart 
+library(ggplot2)
+ggplot(females_county_summ, aes(x = County, y = Med_Per_Female)) +
+  geom_bar(stat = "identity", fill = "skyblue") +  # 'identity' since y-values are pre-summarized
+  labs(
+    title = "Females as Percent of Total Population, 2022",
+    x = "County",
+    y = "Median Percent Female"
+  ) +
+  theme_minimal() +  # Cleaner theme for the plot
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
