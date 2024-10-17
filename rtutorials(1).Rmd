@@ -1,4 +1,10 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
 # getting started
+
 ```{r}
 library(ggplot2)
 library(tidyverse)
@@ -12,39 +18,39 @@ We want to know VT Poverty Rate Comparison, by Family Type (single male vs. sing
 
 ```{r}
 census2022_metadata <- load_variables (2022, "acs5")
-# write.csv(x=census2022_metadata, 
-#           file = "census2022_metadata.csv")
+ write.csv(x=census2022_metadata, 
+          file = "census2022_metadata.csv")
 ```
 
 # Variables we need (the strings denote: in poverty vs. total, single female vs. single male, child age)
 
 B17010_11 - poverty, single male, with children
 
-12 - poverty, single male, with children <5yrs
+12 - poverty, single male, with children \<5yrs
 
 15 - poverty, single male, without children
 
 17 - poverty, single female, with children
 
-18 - poverty, single female, with children <5yrs
+18 - poverty, single female, with children \<5yrs
 
 21 - poverty, single female, without children
 
----
+------------------------------------------------------------------------
 
-B11004_010 - single male, < 18 yrs
+B11004_010 - single male, \< 18 yrs
 
-11 - single male, <6 yrs
+11 - single male, \<6 yrs
 
 14 - single male, no minor children
 
-16 - single female, < 18 yrs
+16 - single female, \< 18 yrs
 
-17 - single female, <6 yrs
+17 - single female, \<6 yrs
 
 20 - single female, no minor children
 
----
+------------------------------------------------------------------------
 
 We should probably save these codes and labels in a dataframe so it's easier to see, and we can query them with lapply, sapply, etc.
 
@@ -91,11 +97,13 @@ vtsinglePar2022 <- get_acs (geography = "block group",
                             year = 2022, 
                             survey = "acs5",
                             output = "wide") |>
-  mutate(County = str_extract(vt_singlePar_2022$NAME, "\\b\\w+ County\\b"))
+
+
+  mutate(County = str_extract(vtsinglePar2022$NAME, "\\b\\w+ County\\b"))
 # in the output, E after the column names means estimates, and M means margin of error. 
 ```
 
-# from here, I think it is easier to first calculate poverty rates by dividing no. of people in a family arrangement who are in poverty by total no. of people in this living arrangement. 
+# from here, I think it is easier to first calculate poverty rates by dividing no. of people in a family arrangement who are in poverty by total no. of people in this living arrangement.
 
 ```{r}
 vtsinglePar2022_wPovertyRates <- vtsinglePar2022 |>
@@ -135,6 +143,7 @@ avgPovertyRates_LF <- avgPovertyRates |>
 ```
 
 # now, we can directly plot the thing, like this:
+
 ```{r}
 avgPovertyRates_LF |>
   ggplot(aes(y = measure, x = value)) + 
@@ -160,4 +169,20 @@ ggplot(aes(y = parGender, x = value, fill = childStatus)) +
   # you can add labels to each column, but it'll take a huge amount of time to get the font size and position right.
   facet_wrap(~County)
 ```
+avgPovertyRates_LF_2 <- avgPovertyRates_LF |>
+  mutate(parGender = ifelse(startsWith(str_remove(measure, 'poverty'), 'M') == TRUE, 'Male','Female')) |>
+  mutate(childStatus = str_replace(
+                        str_remove(
+                          str_remove(measure, 'povertyMale'), 
+                        'povertyFemale'),
+                       'C', 'Child'))
+
+avgPovertyRates_LF_2 |>
+ggplot(aes(y = parGender, x = value, fill = childStatus)) + 
+  geom_col(position = 'dodge') +
+  #geom_text(aes(label = round(value,3), y = parGender, x = value, hjust = -0.5)) +
+  # you can add labels to each column, but it'll take a huge amount of time to get the font size and position right.
+  facet_wrap(~County)
+
+
 
