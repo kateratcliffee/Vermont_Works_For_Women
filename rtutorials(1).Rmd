@@ -1,0 +1,163 @@
+# getting started
+```{r}
+library(ggplot2)
+library(tidyverse)
+library(tidycensus)
+library(stringr)
+```
+
+We want to know VT Poverty Rate Comparison, by Family Type (single male vs. single female X with minor children vs. without minor children vs. with minor children under 5 years old)
+
+# Query metadata for entire 2022 5-year ACS census data. This gives us what variable each B- code corresponds to for lookup.
+
+```{r}
+census2022_metadata <- load_variables (2022, "acs5")
+# write.csv(x=census2022_metadata, 
+#           file = "census2022_metadata.csv")
+```
+
+# Variables we need (the strings denote: in poverty vs. total, single female vs. single male, child age)
+
+B17010_11 - poverty, single male, with children
+
+12 - poverty, single male, with children <5yrs
+
+15 - poverty, single male, without children
+
+17 - poverty, single female, with children
+
+18 - poverty, single female, with children <5yrs
+
+21 - poverty, single female, without children
+
+---
+
+B11004_010 - single male, < 18 yrs
+
+11 - single male, <6 yrs
+
+14 - single male, no minor children
+
+16 - single female, < 18 yrs
+
+17 - single female, <6 yrs
+
+20 - single female, no minor children
+
+---
+
+We should probably save these codes and labels in a dataframe so it's easier to see, and we can query them with lapply, sapply, etc.
+
+Their names are B17010_11 - 11,12,15,17,18,21; and B11004 - 10,11,14,16,17,20, so:
+
+```{r}
+singleParPov_vars <- data.frame(
+                   namePre = c(rep('B17010',6),rep('B11004', 6)),
+                   # namePre is the BXXXX code
+                   nameSuf = c(11,12,15,17,18,21, 10,11,14,16,17,20), 
+                   # nameSuf is the number after _
+                   gender = c(rep(c(rep('male',3),rep('female', 3)),2)), 
+                   # gender of the people measured
+                   childAge = c(rep(c('allChildren','children<5yrs','noChildren'),2), 
+                                rep(c('allChildren','children<6yrs','noChildren'),2)), 
+                   # child age group that this variable represents
+                   measure = c(rep('numInPoverty', 6),rep('numTotal',6)) 
+                   # does it measure no. of people in poverty or total number of people (in this living arrangement)?
+                   ) |>
+  mutate(varName = paste0(namePre, '_', str_sub(paste0('00',as.character(nameSuf)),start = -3))) |>
+  relocate(varName) |> 
+  select(!namePre) |> 
+  select(!nameSuf)
+
+# you can manually add a variable to this df like this:
+#singleParPov_vars <- rbind(singleParPov_vars, list('B17006_001', 'x','x','x'))
+
+# end product (you can do this all by hand, too)
+singleParPov_vars
+```
+
+# Create the dataframe
+
+```{r}
+#load census key, overwrite if one existing
+census_api_key("7f9fe0f583b0c04f100196af6c16c58796014a1f", install = TRUE, overwrite = TRUE)
+readRenviron("~/.Renviron")
+
+## get the variables we need
+
+vtsinglePar2022 <- get_acs (geography = "block group", 
+                            state = "VT", 
+                            variables = singleParPov_vars$varName, # using the list of varNames we constructed 
+                            year = 2022, 
+                            survey = "acs5",
+                            output = "wide") |>
+  mutate(County = str_extract(vt_singlePar_2022$NAME, "\\b\\w+ County\\b"))
+# in the output, E after the column names means estimates, and M means margin of error. 
+```
+
+# from here, I think it is easier to first calculate poverty rates by dividing no. of people in a family arrangement who are in poverty by total no. of people in this living arrangement. 
+
+```{r}
+vtsinglePar2022_wPovertyRates <- vtsinglePar2022 |>
+# male parent
+  mutate(povertyMaleAllC = B17010_011E / B11004_010E) |>
+  mutate(povertyMaleCunder5 = B17010_012E / B11004_011E) |> 
+  # We are actually dividing no. of men with children under 5 in poverty by no. of men with children under 6, so it's not a most ideal measure.
+  mutate(povertyMaleNoC = B17010_015E / B11004_014E) |>
+# female parent
+  mutate(povertyFemaleAllC = B17010_017E / B11004_016E) |>
+  mutate(povertyFemaleCunder5 = B17010_018E / B11004_017E) |> 
+  mutate(povertyFemaleNoC = B17010_021E / B11004_020E)
+```
+
+# Then we create means of poverty rates by county. We can show the mean rates in a new df.
+
+```{r}
+avgPovertyRates <- vtsinglePar2022_wPovertyRates |>
+  group_by(County) |>
+  summarise(povertyMaleAllC = mean(povertyMaleAllC, na.rm = TRUE), # na.rm means remove NAs when calculating mean
+            povertyMaleCunder5 = mean(povertyMaleCunder5, na.rm = TRUE),
+            povertyMaleNoC = mean(povertyMaleNoC, na.rm = TRUE),
+            povertyFemaleAllC = mean(povertyFemaleAllC, na.rm = TRUE),
+            povertyFemaleCunder5 = mean(povertyFemaleCunder5, na.rm = TRUE),
+            povertyFemaleNoC = mean(povertyFemaleNoC, na.rm = TRUE)) |>
+  # add a row that shows state average. You can of course create it as a separate data frame and just summarise() without grouping by County
+  summarise(County = c(County, 'STATE AVERAGE'),
+         across(where(is.numeric), ~ c(., mean(.))))
+```
+
+At this stage, you can export the df for graphing in excel, to directly access the numbers. But to make graphing easier, I like to have the data in a longer format, or have a variable decoding what kind of poverty rate is being measured and another having the actual numbers.
+
+```{r}
+avgPovertyRates_LF <- avgPovertyRates |>
+  # the next line means: Pivot column 2-7 to a longer form by having the column names in a variable called "measure" and the actual values in a variable called "value"
+  pivot_longer(cols = 2:7, names_to = 'measure',values_to = 'value')
+```
+
+# now, we can directly plot the thing, like this:
+```{r}
+avgPovertyRates_LF |>
+  ggplot(aes(y = measure, x = value)) + 
+    geom_col() +
+    facet_wrap(~County)
+```
+
+But this is not very elegant. We can use colors and groupings to distinguish between male vs. female parent and the age group of children. But this requires creating two variables that reflect these categories. We can do that manually, or if you know how to you can do it by separating the current "measure" name:
+
+```{r}
+avgPovertyRates_LF_2 <- avgPovertyRates_LF |>
+  mutate(parGender = ifelse(startsWith(str_remove(measure, 'poverty'), 'M') == TRUE, 'Male','Female')) |>
+  mutate(childStatus = str_replace(
+                        str_remove(
+                          str_remove(measure, 'povertyMale'), 
+                        'povertyFemale'),
+                       'C', 'Child'))
+
+avgPovertyRates_LF_2 |>
+ggplot(aes(y = parGender, x = value, fill = childStatus)) + 
+  geom_col(position = 'dodge') +
+  #geom_text(aes(label = round(value,3), y = parGender, x = value, hjust = -0.5)) +
+  # you can add labels to each column, but it'll take a huge amount of time to get the font size and position right.
+  facet_wrap(~County)
+```
+
